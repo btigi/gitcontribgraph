@@ -1,43 +1,113 @@
 using LibGit2Sharp;
 using SixLabors.ImageSharp;
+using System.CommandLine;
 
-if (args.Length == 0)
+var inputDirOption = new Option<string>(
+    aliases: new[] { "--input", "-i" },
+    description: "Path to the git repository directory")
 {
-    Console.WriteLine("Usage: GitContribGraph <path-to-git-repo>");
-    return 1;
-}
+    IsRequired = true
+};
 
-string repoPath = args[0];
+var outputFileOption = new Option<string>(
+    aliases: new[] { "--output", "-o" },
+    description: "Output filename for the PNG image",
+    getDefaultValue: () => "output.png");
 
-if (!Repository.IsValid(repoPath))
+var startDateOption = new Option<string>(
+    aliases: new[] { "--start-date", "-s" },
+    description: "Start date for counting commits (format: YYYY-MM-DD)")
 {
-    Console.WriteLine($"Error: '{repoPath}' is not a valid git repository.");
-    return 1;
-}
+    ArgumentHelpName = "YYYY-MM-DD"
+};
 
-using var repo = new Repository(repoPath);
-
-var endDate = DateTime.Today;
-var startDate = endDate.AddMonths(-12);
-
-var commitsByDate = new Dictionary<DateTime, int>();
-
-foreach (var commit in repo.Commits)
+var endDateOption = new Option<string>(
+    aliases: new[] { "--end-date", "-e" },
+    description: "End date for counting commits (format: YYYY-MM-DD)")
 {
-    var commitDate = commit.Committer.When.DateTime.Date;
-    
-    if (commitDate >= startDate && commitDate < endDate)
+    ArgumentHelpName = "YYYY-MM-DD"
+};
+
+var rootCommand = new RootCommand("Generates a GitHub-style contribution graph from a git repository")
+{
+    inputDirOption,
+    outputFileOption,
+    startDateOption,
+    endDateOption
+};
+
+rootCommand.SetHandler((string inputDir, string? outputFile, string? startDateStr, string? endDateStr) =>
+{
+    if (!Repository.IsValid(inputDir))
     {
-        commitsByDate.TryGetValue(commitDate, out int count);
-        commitsByDate[commitDate] = count + 1;
+        Console.WriteLine($"Error: '{inputDir}' is not a valid git repository.");
+        Environment.Exit(1);
+        return;
     }
-}
 
-var graphGenerator = new ContributionGraphGenerator();
-var image = graphGenerator.Generate(commitsByDate, startDate, endDate);
+    // Parse dates with defaults
+    DateTime startDate = DateTime.Today.AddMonths(-12);
+    DateTime endDate = DateTime.Today;
 
-image.SaveAsPng("output.png");
-Console.WriteLine("Contribution graph saved to output.png");
+    if (!string.IsNullOrWhiteSpace(startDateStr))
+    {
+        if (!DateTime.TryParse(startDateStr, out startDate))
+        {
+            Console.WriteLine($"Error: Invalid start date format '{startDateStr}'. Expected YYYY-MM-DD.");
+            Environment.Exit(1);
+            return;
+        }
+        startDate = startDate.Date; // Ensure we use just the date part
+    }
 
-return 0;
+    if (!string.IsNullOrWhiteSpace(endDateStr))
+    {
+        if (!DateTime.TryParse(endDateStr, out endDate))
+        {
+            Console.WriteLine($"Error: Invalid end date format '{endDateStr}'. Expected YYYY-MM-DD.");
+            Environment.Exit(1);
+            return;
+        }
+        endDate = endDate.Date; // Ensure we use just the date part
+    }
+
+    if (startDate >= endDate)
+    {
+        Console.WriteLine("Error: Start date must be before end date.");
+        Environment.Exit(1);
+        return;
+    }
+
+    string outputFileName = outputFile ?? "output.png";
+
+    using var repo = new Repository(inputDir);
+
+    // Count commits per day
+    var commitsByDate = new Dictionary<DateTime, int>();
+
+    foreach (var commit in repo.Commits)
+    {
+        var commitDate = commit.Committer.When.DateTime.Date;
+        
+        if (commitDate >= startDate && commitDate < endDate)
+        {
+            commitsByDate.TryGetValue(commitDate, out int count);
+            commitsByDate[commitDate] = count + 1;
+        }
+    }
+
+    Console.WriteLine($"Processing commits from {startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}...");
+    Console.WriteLine($"Found {commitsByDate.Values.Sum()} total contributions across {commitsByDate.Count} days");
+
+    // Generate the contribution graph
+    var graphGenerator = new ContributionGraphGenerator();
+    var image = graphGenerator.Generate(commitsByDate, startDate, endDate);
+
+    // Save the image
+    image.SaveAsPng(outputFileName);
+    Console.WriteLine($"Contribution graph saved to {outputFileName}");
+}, inputDirOption, outputFileOption, startDateOption, endDateOption);
+
+return await rootCommand.InvokeAsync(args);
+
 

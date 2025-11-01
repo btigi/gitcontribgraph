@@ -34,16 +34,21 @@ var scanSubdirectoriesOption = new Option<bool>(
     description: "Recursively scan all git repositories in subdirectories and combine their data",
     getDefaultValue: () => false);
 
+var userFilterOption = new Option<string>(
+    aliases: new[] { "--user", "-u" },
+    description: "Filter commits by user (matches name or email, case-insensitive)");
+
 var rootCommand = new RootCommand("Generates a GitHub-style contribution graph from a git repository")
 {
     inputDirOption,
     outputFileOption,
     startDateOption,
     endDateOption,
-    scanSubdirectoriesOption
+    scanSubdirectoriesOption,
+    userFilterOption
 };
 
-rootCommand.SetHandler((string inputDir, string? outputFile, string? startDateStr, string? endDateStr, bool scanSubdirectories) =>
+rootCommand.SetHandler((string inputDir, string? outputFile, string? startDateStr, string? endDateStr, bool scanSubdirectories, string? userFilter) =>
 {
     // Parse dates with defaults
     DateTime startDate = DateTime.Today.AddMonths(-12);
@@ -108,7 +113,7 @@ rootCommand.SetHandler((string inputDir, string? outputFile, string? startDateSt
         {
             try
             {
-                ProcessRepository(repoPath, startDate, endDate, commitsByDate);
+                ProcessRepository(repoPath, startDate, endDate, commitsByDate, userFilter);
                 reposProcessed.Add(repoPath);
             }
             catch (Exception ex)
@@ -127,11 +132,15 @@ rootCommand.SetHandler((string inputDir, string? outputFile, string? startDateSt
             return;
         }
 
-        ProcessRepository(inputDir, startDate, endDate, commitsByDate);
+        ProcessRepository(inputDir, startDate, endDate, commitsByDate, userFilter);
         reposProcessed.Add(inputDir);
     }
 
     Console.WriteLine($"\nProcessing commits from {startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}...");
+    if (!string.IsNullOrWhiteSpace(userFilter))
+    {
+        Console.WriteLine($"Filtering by user: {userFilter}");
+    }
     Console.WriteLine($"Processed {reposProcessed.Count} repository(ies)");
     Console.WriteLine($"Found {commitsByDate.Values.Sum()} total contributions across {commitsByDate.Count} days");
 
@@ -142,7 +151,7 @@ rootCommand.SetHandler((string inputDir, string? outputFile, string? startDateSt
     // Save the image
     image.SaveAsPng(outputFileName);
     Console.WriteLine($"Contribution graph saved to {outputFileName}");
-}, inputDirOption, outputFileOption, startDateOption, endDateOption, scanSubdirectoriesOption);
+}, inputDirOption, outputFileOption, startDateOption, endDateOption, scanSubdirectoriesOption, userFilterOption);
 
 static List<string> FindGitRepositories(string rootPath)
 {
@@ -211,16 +220,45 @@ static void ScanDirectory(string directory, List<string> repositories, HashSet<s
     }
 }
 
-static void ProcessRepository(string repoPath, DateTime startDate, DateTime endDate, Dictionary<DateTime, int> commitsByDate)
+static void ProcessRepository(string repoPath, DateTime startDate, DateTime endDate, Dictionary<DateTime, int> commitsByDate, string? userFilter)
 {
     using var repo = new Repository(repoPath);
 
     foreach (var commit in repo.Commits)
     {
+        if (commit.Committer?.When == null)
+            continue;
+            
         var commitDate = commit.Committer.When.DateTime.Date;
         
         if (commitDate >= startDate && commitDate < endDate)
         {
+            if (!string.IsNullOrWhiteSpace(userFilter))
+            {
+                bool matchesFilter = false;
+                
+                if (commit.Author != null)
+                {
+                    matchesFilter = (!string.IsNullOrEmpty(commit.Author.Name) && 
+                                    commit.Author.Name.Contains(userFilter, StringComparison.OrdinalIgnoreCase)) ||
+                                   (!string.IsNullOrEmpty(commit.Author.Email) && 
+                                    commit.Author.Email.Contains(userFilter, StringComparison.OrdinalIgnoreCase));
+                }
+                
+                if (!matchesFilter && commit.Committer != null)
+                {
+                    matchesFilter = (!string.IsNullOrEmpty(commit.Committer.Name) && 
+                                    commit.Committer.Name.Contains(userFilter, StringComparison.OrdinalIgnoreCase)) ||
+                                   (!string.IsNullOrEmpty(commit.Committer.Email) && 
+                                    commit.Committer.Email.Contains(userFilter, StringComparison.OrdinalIgnoreCase));
+                }
+                
+                if (!matchesFilter)
+                {
+                    continue;
+                }
+            }
+            
             commitsByDate.TryGetValue(commitDate, out int count);
             commitsByDate[commitDate] = count + 1;
         }

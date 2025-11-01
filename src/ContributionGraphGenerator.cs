@@ -11,7 +11,7 @@ public class ContributionGraphGenerator
     private const int MarginTop = 60;
     private const int MarginBottom = 40;
     private const int MarginLeft = 40;
-    private const int MarginRight = 100;
+    private const int MarginRight = 150;
     private const int MonthLabelHeight = 20;
     private const int DayLabelWidth = 30;
     private const int LegendHeight = 20;
@@ -251,8 +251,17 @@ public class ContributionGraphGenerator
         var font = SystemFonts.CreateFont("Segoe UI", 12, FontStyle.Regular);
         var brush = new SolidBrush(TextColor);
         
+        int lessTextWidth = 35;
+        int moreTextWidth = 40;
+        
+        // Calculate legend width
+        int legendWidth = lessTextWidth + 5 + // "Less" + spacing
+                          ContributionColors.Length * (CellSize + 2) + // Color squares (5 * 13 = 65)
+                          5 + // spacing before "More"
+                          moreTextWidth; // "More"
+        
         int legendY = imageHeight - LegendHeight - 10;
-        int legendX = imageWidth - MarginRight + 20;
+        int legendX = imageWidth - MarginRight + 10;
         
         var lessOptions = new RichTextOptions(font)
         {
@@ -261,7 +270,7 @@ public class ContributionGraphGenerator
             VerticalAlignment = VerticalAlignment.Center
         };
         image.Mutate(ctx => ctx.DrawText(lessOptions, "Less", brush));
-        legendX += 40;
+        legendX += lessTextWidth + 5;
         
         for (int i = 0; i < ContributionColors.Length; i++)
         {

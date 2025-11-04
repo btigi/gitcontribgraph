@@ -16,18 +16,23 @@ public class ContributionGraphGenerator
     private const int DayLabelWidth = 30;
     private const int LegendHeight = 20;
     
-    private readonly Rgba32 BackgroundColor = new Rgba32(13, 17, 23);
-    private readonly Rgba32 TextColor = new Rgba32(201, 209, 217);
-    private readonly Rgba32 GridColor = new Rgba32(22, 27, 34);
+    private readonly Rgba32 BackgroundColour = new Rgba32(13, 17, 23);
+    private readonly Rgba32 TextColour = new Rgba32(201, 209, 217);
+    private readonly Rgba32 GridColour = new Rgba32(22, 27, 34);
     
-    private readonly Rgba32[] ContributionColors = new[]
+    private readonly Rgba32[] ContributionColours;
+
+    public ContributionGraphGenerator(Rgba32[]? contributionColours = null)
     {
-        new Rgba32(22, 27, 34),      // No contributions
-        new Rgba32(14, 68, 41),      // 1-2 contributions
-        new Rgba32(0, 109, 50),      // 3-5 contributions
-        new Rgba32(38, 166, 65),     // 6-10 contributions
-        new Rgba32(57, 211, 83),     // 11+ contributions
-    };
+        ContributionColours = contributionColours ?? new[]
+        {
+            new Rgba32(22, 27, 34),      // No contributions
+            new Rgba32(14, 68, 41),      // 1-2 contributions
+            new Rgba32(0, 109, 50),      // 3-5 contributions
+            new Rgba32(38, 166, 65),     // 6-10 contributions
+            new Rgba32(57, 211, 83),     // 11+ contributions
+        };
+    }
 
     public Image<Rgba32> Generate(Dictionary<DateTime, int> commitsByDate, DateTime startDate, DateTime endDate)
     {
@@ -40,7 +45,7 @@ public class ContributionGraphGenerator
         int imageWidth = MarginLeft + DayLabelWidth + gridWidth + MarginRight;
         int imageHeight = MarginTop + MonthLabelHeight + gridHeight + MarginBottom + LegendHeight;
         
-        var image = new Image<Rgba32>(imageWidth, imageHeight, BackgroundColor);
+        var image = new Image<Rgba32>(imageWidth, imageHeight, BackgroundColour);
         
         int maxCommits = commitsByDate.Values.DefaultIfEmpty(0).Max();
         
@@ -115,7 +120,7 @@ public class ContributionGraphGenerator
     private void DrawMonthLabels(Image<Rgba32> image, List<List<DateTime>> weeks, DateTime startDate)
     {
         var font = SystemFonts.CreateFont("Segoe UI", 12, FontStyle.Regular);
-        var brush = new SolidBrush(TextColor);
+        var brush = new SolidBrush(TextColour);
         
         string currentMonth = "";
         int currentMonthStartWeek = -1;
@@ -173,7 +178,7 @@ public class ContributionGraphGenerator
     private void DrawDayLabels(Image<Rgba32> image, List<List<DateTime>> weeks)
     {
         var font = SystemFonts.CreateFont("Segoe UI", 12, FontStyle.Regular);
-        var brush = new SolidBrush(TextColor);
+        var brush = new SolidBrush(TextColour);
         
         string[] dayLabels = { "Mon", "Wed", "Fri" };
         int[] dayIndices = { 1, 3, 5 }; // Monday, Wednesday, Friday
@@ -207,56 +212,56 @@ public class ContributionGraphGenerator
                 int x = MarginLeft + DayLabelWidth + weekIndex * (CellSize + CellSpacing);
                 int y = MarginTop + MonthLabelHeight + dayIndex * (CellSize + CellSpacing);
                 
-                Rgba32 color;
+                Rgba32 colour;
                 
                 if (day == DateTime.MinValue)
                 {
-                    color = BackgroundColor; // Empty cell
+                    colour = BackgroundColour; // Empty cell
                 }
                 else
                 {
                     commitsByDate.TryGetValue(day, out int commitCount);
-                    color = GetColorForCommitCount(commitCount, maxCommits);
+                    colour = GetColourForCommitCount(commitCount, maxCommits);
                 }
                 
                 var rect = new Rectangle(x, y, CellSize, CellSize);
-                image.Mutate(ctx => ctx.Fill(color, rect));
+                image.Mutate(ctx => ctx.Fill(colour, rect));
             }
         }
     }
 
-    private Rgba32 GetColorForCommitCount(int commitCount, int maxCommits)
+    private Rgba32 GetColourForCommitCount(int commitCount, int maxCommits)
     {
         if (commitCount == 0)
-            return ContributionColors[0];
+            return ContributionColours[0];
         
         if (maxCommits == 0)
-            return ContributionColors[0];
+            return ContributionColours[0];
         
-        // Scale commit count to color index (1-4)
+        // Scale commit count to colour index (1-4)
         float ratio = (float)commitCount / maxCommits;
         
         if (ratio < 0.25f)
-            return ContributionColors[1];
+            return ContributionColours[1];
         else if (ratio < 0.5f)
-            return ContributionColors[2];
+            return ContributionColours[2];
         else if (ratio < 0.75f)
-            return ContributionColors[3];
+            return ContributionColours[3];
         else
-            return ContributionColors[4];
+            return ContributionColours[4];
     }
 
     private void DrawLegend(Image<Rgba32> image, int imageWidth, int imageHeight, int maxCommits)
     {
         var font = SystemFonts.CreateFont("Segoe UI", 12, FontStyle.Regular);
-        var brush = new SolidBrush(TextColor);
+        var brush = new SolidBrush(TextColour);
         
         int lessTextWidth = 35;
         int moreTextWidth = 40;
         
         // Calculate legend width
         int legendWidth = lessTextWidth + 5 + // "Less" + spacing
-                          ContributionColors.Length * (CellSize + 2) + // Color squares (5 * 13 = 65)
+                          ContributionColours.Length * (CellSize + 2) + // Colour squares (5 * 13 = 65)
                           5 + // spacing before "More"
                           moreTextWidth; // "More"
         
@@ -272,10 +277,10 @@ public class ContributionGraphGenerator
         image.Mutate(ctx => ctx.DrawText(lessOptions, "Less", brush));
         legendX += lessTextWidth + 5;
         
-        for (int i = 0; i < ContributionColors.Length; i++)
+        for (int i = 0; i < ContributionColours.Length; i++)
         {
             var rect = new Rectangle(legendX, legendY - CellSize / 2, CellSize, CellSize);
-            image.Mutate(ctx => ctx.Fill(ContributionColors[i], rect));
+            image.Mutate(ctx => ctx.Fill(ContributionColours[i], rect));
             legendX += CellSize + 2;
         }
         
@@ -292,7 +297,7 @@ public class ContributionGraphGenerator
     private void DrawTitle(Image<Rgba32> image, int imageWidth, int totalContributions)
     {
         var font = SystemFonts.CreateFont("Segoe UI", 14, FontStyle.Regular);
-        var brush = new SolidBrush(TextColor);
+        var brush = new SolidBrush(TextColour);
         
         string title = $"{totalContributions} contributions in {DateTime.Now.Year}";
         int x = MarginLeft + DayLabelWidth;

@@ -1,7 +1,9 @@
 using LibGit2Sharp;
 using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.PixelFormats;
 using System.CommandLine;
 using System.IO;
+using System.Text.Json;
 
 var inputDirOption = new Option<string>(
     aliases: new[] { "--input", "-i" },
@@ -38,6 +40,10 @@ var userFilterOption = new Option<string>(
     aliases: new[] { "--user", "-u" },
     description: "Filter commits by user (matches name or email, case-insensitive)");
 
+var coloursFileOption = new Option<string>(
+    aliases: new[] { "--colours", "-c" },
+    description: "Path to JSON file containing colour configuration (hex format)");
+
 var rootCommand = new RootCommand("Generates a GitHub-style contribution graph from a git repository")
 {
     inputDirOption,
@@ -45,10 +51,11 @@ var rootCommand = new RootCommand("Generates a GitHub-style contribution graph f
     startDateOption,
     endDateOption,
     scanSubdirectoriesOption,
-    userFilterOption
+    userFilterOption,
+    coloursFileOption
 };
 
-rootCommand.SetHandler((string inputDir, string? outputFile, string? startDateStr, string? endDateStr, bool scanSubdirectories, string? userFilter) =>
+rootCommand.SetHandler((string inputDir, string? outputFile, string? startDateStr, string? endDateStr, bool scanSubdirectories, string? userFilter, string? coloursFile) =>
 {
     // Parse dates with defaults
     DateTime startDate = DateTime.Today.AddMonths(-12);
@@ -144,14 +151,137 @@ rootCommand.SetHandler((string inputDir, string? outputFile, string? startDateSt
     Console.WriteLine($"Processed {reposProcessed.Count} repository(ies)");
     Console.WriteLine($"Found {commitsByDate.Values.Sum()} total contributions across {commitsByDate.Count} days");
 
+    Rgba32[] contributionColours = LoadColoursFromFile(coloursFile);
+
     // Generate the contribution graph
-    var graphGenerator = new ContributionGraphGenerator();
+    var graphGenerator = new ContributionGraphGenerator(contributionColours);
     var image = graphGenerator.Generate(commitsByDate, startDate, endDate);
 
     // Save the image
     image.SaveAsPng(outputFileName);
     Console.WriteLine($"Contribution graph saved to {outputFileName}");
-}, inputDirOption, outputFileOption, startDateOption, endDateOption, scanSubdirectoriesOption, userFilterOption);
+}, inputDirOption, outputFileOption, startDateOption, endDateOption, scanSubdirectoriesOption, userFilterOption, coloursFileOption);
+
+static Rgba32[] LoadColoursFromFile(string? coloursFile)
+{
+    // Default green colours (GitHub style)
+    Rgba32[] defaultColours = new[]
+    {
+        new Rgba32(22, 27, 34),      // No contributions
+        new Rgba32(14, 68, 41),      // 1-2 contributions
+        new Rgba32(0, 109, 50),      // 3-5 contributions
+        new Rgba32(38, 166, 65),     // 6-10 contributions
+        new Rgba32(57, 211, 83),     // 11+ contributions
+    };
+
+    if (string.IsNullOrWhiteSpace(coloursFile))
+    {
+        return defaultColours;
+    }
+
+    if (!File.Exists(coloursFile))
+    {
+        Console.WriteLine($"Warning: Colours file '{coloursFile}' not found. Using default colours.");
+        return defaultColours;
+    }
+
+    try
+    {
+        string jsonContent = File.ReadAllText(coloursFile);
+        var jsonDoc = JsonDocument.Parse(jsonContent);
+        var root = jsonDoc.RootElement;
+
+        // Expect an array of hex colour strings
+        if (root.ValueKind != JsonValueKind.Array)
+        {
+            Console.WriteLine($"Warning: Colours file '{coloursFile}' must contain a JSON array. Using default colours.");
+            return defaultColours;
+        }
+
+        var colours = new List<Rgba32>();
+        foreach (var element in root.EnumerateArray())
+        {
+            if (element.ValueKind != JsonValueKind.String)
+            {
+                Console.WriteLine($"Warning: Invalid colour format in colours file. Using default colours.");
+                return defaultColours;
+            }
+
+            string hexColour = element.GetString() ?? string.Empty;
+            if (TryParseHexColour(hexColour, out Rgba32 colour))
+            {
+                colours.Add(colour);
+            }
+            else
+            {
+                Console.WriteLine($"Warning: Invalid hex colour '{hexColour}' in colours file. Using default colours.");
+                return defaultColours;
+            }
+        }
+
+        if (colours.Count != 5)
+        {
+            Console.WriteLine($"Warning: Colours file must contain exactly 5 colours (found {colours.Count}). Using default colours.");
+            return defaultColours;
+        }
+
+        return colours.ToArray();
+    }
+    catch (JsonException ex)
+    {
+        Console.WriteLine($"Warning: Invalid JSON in colours file '{coloursFile}': {ex.Message}. Using default colours.");
+        return defaultColours;
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Warning: Error reading colours file '{coloursFile}': {ex.Message}. Using default colours.");
+        return defaultColours;
+    }
+}
+
+static bool TryParseHexColour(string hex, out Rgba32 colour)
+{
+    colour = default;
+
+    if (string.IsNullOrWhiteSpace(hex))
+        return false;
+
+    // Remove # if present
+    hex = hex.TrimStart('#');
+
+    // Must be 6 characters (RRGGBB) or 8 characters (RRGGBBAA)
+    if (hex.Length != 6 && hex.Length != 8)
+        return false;
+
+    try
+    {
+        uint value = Convert.ToUInt32(hex, 16);
+        
+        if (hex.Length == 6)
+        {
+            // RRGGBB format - assume alpha = 255 (fully opaque)
+            byte r = (byte)((value >> 16) & 0xFF);
+            byte g = (byte)((value >> 8) & 0xFF);
+            byte b = (byte)(value & 0xFF);
+            colour = new Rgba32(r, g, b, 255);
+        }
+        else
+        {
+            // RRGGBBAA format
+            byte r = (byte)((value >> 24) & 0xFF);
+            byte g = (byte)((value >> 16) & 0xFF);
+            byte b = (byte)((value >> 8) & 0xFF);
+            byte a = (byte)(value & 0xFF);
+            colour = new Rgba32(r, g, b, a);
+        }
+
+        return true;
+    }
+    catch
+    {
+        return false;
+    }
+}
 
 static List<string> FindGitRepositories(string rootPath)
 {
